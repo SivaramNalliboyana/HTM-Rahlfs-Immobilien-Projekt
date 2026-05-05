@@ -55,8 +55,8 @@ Three independent processes — bot, API, frontend dev server — start each in 
 
 You also need:
 
-- A **Telegram Bot token** — get one in 60 seconds by messaging [@BotFather](https://t.me/BotFather) on Telegram → `/newbot` → follow prompts → copy the token.
-- An **Anthropic API key** — create at <https://console.anthropic.com/>.
+- A **Telegram Bot token** — provided in the shared Google Drive folder alongside this submission.
+- An **Anthropic API key** — please reach out to the devs and we'll share one.
 
 ---
 
@@ -124,12 +124,6 @@ You need **three terminals running at the same time**. Order doesn't strictly ma
 uvicorn api:app --reload --port 8000
 ```
 
-Smoke tests:
-
-- <http://localhost:8000/api/health> → `{"ok":true,"triage_enabled":true}`
-- <http://localhost:8000/api/cases> → `[]` (until the bot writes its first complete case)
-- <http://localhost:8000/api/stats> → counters
-
 ### Terminal B — Telegram bot
 
 ```powershell
@@ -180,24 +174,6 @@ This is the path the jury should walk:
 
 ---
 
-## What's persisted where
-
-All state is plain JSON on disk under `./data/` — easy to inspect, easy to delete to reset.
-
-| Path | Owner | Purpose |
-|------|-------|---------|
-| `data/sessions.json` | bot writes; api reads/writes | one entry per Mangelmeldung (status, mangelerfassung, bilder, triage, handwerker, termine) |
-| `data/tenants.json` | bot writes | per-chat Stammdaten cache so returning tenants skip onboarding |
-| `data/photos/<chat_id>/*.jpg` | bot writes | uploaded images (served by the API at `/photos/...`) |
-
-To reset to a clean slate:
-
-```powershell
-Remove-Item -Recurse -Force data
-```
-
----
-
 ## Component cheat-sheet
 
 | Path | What it is |
@@ -209,55 +185,6 @@ Remove-Item -Recurse -Force data
 | `frontend/src/components/PdfPreview.jsx` | A4 layout + `html2pdf.js` export. |
 | `pitch.html` / `pitch.pptx` | Pitch deck (HTML for live presenting, PPTX for handout). |
 | `build_pitch_pptx.py` | Regenerates `pitch.pptx` from the HTML structure. |
-
----
-
-## Triage prompt
-
-`api.py → TRIAGE_PROMPT` defines the 4 urgency levels and the JSON contract:
-
-```json
-{
-  "urgency": "kritisch | hoch | mittel | niedrig",
-  "urgency_reason": "1-2 Sätze Begründung",
-  "actions": [{"label": "...", "deadline": "sofort | 24h | diese Woche | nächste Woche"}],
-  "summary": "ein-Satz-Empfehlung"
-}
-```
-
-Triage is generated **once per case** and persisted into `sessions.json` under `triage`. To force a regeneration call:
-
-```
-POST /api/cases/<case_id>/triage/regenerate
-```
-
----
-
-## Mocked Handwerker
-
-Six fixtures live in `api.py → MOCK_HANDWERKER` (Sanitär, Heizung, Elektrik, Schlüsseldienst, Allgemein). Recommendation logic: filter by case category first, then sort by `(rating ↓, distance ↑)`, return top-4. The 4 timing slots are derived from the current date (`_next_week_timings()`): next Mon 09:00, Tue 14:00, Wed 10:00, Thu 16:00.
-
----
-
-## Troubleshooting
-
-**Bot says `TELEGRAM_BOT_TOKEN is not set`.**
-Your `.env` is missing or wasn't loaded. Make sure it sits next to `bot.py` and that you started the venv.
-
-**Dashboard shows `Fehler beim Laden: Failed to fetch`.**
-The API isn't running or isn't on port 8000. Restart Terminal A.
-
-**Triage stuck on `KI bewertet…`.**
-Either the Anthropic key is invalid / out of quota, or there's a network issue. Check Terminal A's log — `Triage API error: ...` will tell you which.
-
-**`Handwerker zuweisen` worked but no message arrived in Telegram.**
-The API logs `Failed to send Telegram message to <chat_id>: ...` if it can't reach Telegram. Most common cause: the user has never spoken to the bot from this chat (Telegram only allows the bot to message users who initiated the conversation), or the `TELEGRAM_BOT_TOKEN` differs between `bot.py` and `api.py` (they must use the same `.env`).
-
-**Port already in use.**
-Override: `uvicorn api:app --port 8001` and update `frontend/vite.config.js` proxy targets accordingly.
-
-**Photos appear broken in the dashboard.**
-Check that `data/photos/<chat_id>/...` exists and that `/photos/<chat_id>/<file>` returns 200 from the API. The frontend uses the path returned by the API; restart the API after manually editing files in `data/`.
 
 ---
 
