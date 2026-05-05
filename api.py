@@ -16,7 +16,7 @@ import json
 import logging
 import os
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import anthropic
@@ -24,6 +24,8 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
+from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup
 
 load_dotenv()
 
@@ -52,6 +54,120 @@ if os.getenv("ANTHROPIC_API_KEY"):
     claude = anthropic.AsyncAnthropic()
 else:
     logger.warning("ANTHROPIC_API_KEY not set — triage generation disabled")
+
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+_telegram_bot: Bot | None = None
+
+
+def _get_telegram_bot() -> Bot | None:
+    global _telegram_bot
+    if _telegram_bot is None and TELEGRAM_TOKEN:
+        _telegram_bot = Bot(token=TELEGRAM_TOKEN)
+    return _telegram_bot
+
+
+MOCK_HANDWERKER = [
+    {
+        "id": "hw1",
+        "name": "Sanitär Müller GmbH",
+        "gewerk": "Wasser & Sanitär",
+        "rating": 4.8,
+        "stundensatz": 75,
+        "distance_km": 2.4,
+        "verfuegbar": True,
+        "telefon": "+49 30 12345678",
+        "beschreibung": "Spezialist für Rohrbrüche, Lecks und Sanitärinstallationen. Schnelle Reaktionszeit.",
+    },
+    {
+        "id": "hw2",
+        "name": "Aquaprofis Berlin",
+        "gewerk": "Wasser & Sanitär",
+        "rating": 4.6,
+        "stundensatz": 68,
+        "distance_km": 5.1,
+        "verfuegbar": True,
+        "telefon": "+49 30 23456789",
+        "beschreibung": "24/7 Notdienst. Erfahrener Partner bei Wasserschäden.",
+    },
+    {
+        "id": "hw3",
+        "name": "Heizung Schmidt & Söhne",
+        "gewerk": "Heizung",
+        "rating": 4.9,
+        "stundensatz": 82,
+        "distance_km": 3.7,
+        "verfuegbar": True,
+        "telefon": "+49 30 34567890",
+        "beschreibung": "Heizungswartung, Reparatur und Modernisierung.",
+    },
+    {
+        "id": "hw4",
+        "name": "Elektro Wagner",
+        "gewerk": "Elektrik",
+        "rating": 4.7,
+        "stundensatz": 78,
+        "distance_km": 1.9,
+        "verfuegbar": True,
+        "telefon": "+49 30 45678901",
+        "beschreibung": "Elektroinstallation, Steckdosen, Beleuchtung — Meisterbetrieb.",
+    },
+    {
+        "id": "hw5",
+        "name": "Schlüsseldienst Becker",
+        "gewerk": "Schließanlage",
+        "rating": 4.5,
+        "stundensatz": 70,
+        "distance_km": 2.8,
+        "verfuegbar": True,
+        "telefon": "+49 30 56789012",
+        "beschreibung": "Schloss- und Türreparaturen, Notöffnung, Fensterservice.",
+    },
+    {
+        "id": "hw6",
+        "name": "Hausmeister Service Pro",
+        "gewerk": "Allgemein",
+        "rating": 4.3,
+        "stundensatz": 55,
+        "distance_km": 1.2,
+        "verfuegbar": True,
+        "telefon": "+49 30 67890123",
+        "beschreibung": "Allgemeine Reparaturen rund ums Haus, Klein- und Sammelaufträge.",
+    },
+]
+
+
+def _recommend_handwerker(category: str) -> list[dict]:
+    matches = sorted(
+        (h for h in MOCK_HANDWERKER if h["gewerk"] == category),
+        key=lambda h: (-h["rating"], h["distance_km"]),
+    )
+    others = sorted(
+        (h for h in MOCK_HANDWERKER if h["gewerk"] != category),
+        key=lambda h: (-h["rating"], h["distance_km"]),
+    )
+    return (matches + others)[:4]
+
+
+WEEKDAYS_DE = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"]
+
+
+def _next_week_timings() -> list[dict]:
+    today = datetime.now().date()
+    days_until_monday = (7 - today.weekday()) % 7 or 7
+    monday = today + timedelta(days=days_until_monday)
+    slots = [(0, "09:00"), (1, "14:00"), (2, "10:00"), (3, "16:00")]
+    out = []
+    for i, (offset, time) in enumerate(slots):
+        date = monday + timedelta(days=offset)
+        out.append(
+            {
+                "id": f"slot_{i}",
+                "label": f"{WEEKDAYS_DE[date.weekday()]}, {date.strftime('%d.%m.%Y')} um {time}",
+                "datum": date.isoformat(),
+                "uhrzeit": time,
+            }
+        )
+    return out
 
 
 TRIAGE_PROMPT = """Du bist ein erfahrener Facility Manager bei einer deutschen Hausverwaltung. Du erhältst eine erfasste Mangelmeldung und musst sie für den Verwalter triagieren.
@@ -288,6 +404,8 @@ def _build_case(session: dict) -> dict:
         "triage": triage,
         "priority": _priority_from_triage(triage),
         "triage_pending": triage is None,
+        "handwerker": session.get("handwerker"),
+        "termine": session.get("termine"),
     }
 
 
@@ -370,6 +488,92 @@ async def regenerate_triage(case_id: str) -> dict:
         target,
     )
     return _build_case(fresh)
+
+
+def _find_session_by_case_id(case_id: str, sessions: dict) -> dict | None:
+    for s in sessions.values():
+        sid = s.get("session_id", "")
+        if _short_id(sid) == case_id or sid == case_id:
+            return s
+    return None
+
+
+@app.get("/api/cases/{case_id}/handwerker")
+async def list_handwerker(case_id: str) -> dict:
+    case_id = case_id.lstrip("#")
+    sessions = _load_sessions_dict()
+    target = _find_session_by_case_id(case_id, sessions)
+    if target is None:
+        raise HTTPException(status_code=404, detail="Case not found")
+    category = _category(target.get("mangelerfassung") or {})
+    return {
+        "case_id": case_id,
+        "category": category,
+        "recommendations": _recommend_handwerker(category),
+        "already_assigned": target.get("handwerker"),
+    }
+
+
+class AssignBody(BaseModel):
+    handwerker_id: str
+
+
+@app.post("/api/cases/{case_id}/assign_handwerker")
+async def assign_handwerker(case_id: str, body: AssignBody) -> dict:
+    case_id = case_id.lstrip("#")
+    sessions = _load_sessions_dict()
+    target = _find_session_by_case_id(case_id, sessions)
+    if target is None:
+        raise HTTPException(status_code=404, detail="Case not found")
+    handwerker = next((h for h in MOCK_HANDWERKER if h["id"] == body.handwerker_id), None)
+    if handwerker is None:
+        raise HTTPException(status_code=404, detail="Handwerker not found")
+
+    timings = _next_week_timings()
+
+    target["handwerker"] = {
+        "id": handwerker["id"],
+        "name": handwerker["name"],
+        "gewerk": handwerker["gewerk"],
+        "telefon": handwerker["telefon"],
+        "assigned_at": _now_iso(),
+    }
+    target["termine"] = {
+        "vorgeschlagen": timings,
+        "ausgewaehlt": None,
+    }
+    target["aktualisiert_am"] = _now_iso()
+    sessions[target["session_id"]] = target
+    SESSIONS_FILE.write_text(
+        json.dumps(sessions, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
+    chat_id = target.get("chat_id")
+    bot = _get_telegram_bot()
+    if bot and chat_id:
+        text = (
+            f"Wir haben einen Handwerker für Sie gefunden:\n\n"
+            f"{handwerker['name']} ({handwerker['gewerk']})\n\n"
+            f"Bitte wählen Sie einen passenden Termin in der nächsten Woche:"
+        )
+        keyboard = InlineKeyboardMarkup(
+            [
+                [InlineKeyboardButton(t["label"], callback_data=f"timing:{t['id']}")]
+                for t in timings
+            ]
+        )
+        try:
+            await bot.send_message(
+                chat_id=int(chat_id), text=text, reply_markup=keyboard
+            )
+        except Exception as e:
+            logger.warning("Failed to send Telegram message to %s: %s", chat_id, e)
+    else:
+        logger.warning(
+            "Skipping Telegram notification (bot=%s, chat_id=%s)", bool(bot), chat_id
+        )
+
+    return _build_case(target)
 
 
 @app.get("/api/stats")
