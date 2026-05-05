@@ -2,7 +2,8 @@ import json
 import logging
 import os
 import re
-from datetime import datetime
+import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 import anthropic
@@ -26,7 +27,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-CHOOSING_TYPE, PRIVATE_STAMMDATEN, PRIVATE_MANGEL, COMMERCIAL_FLOW = range(4)
+CHOOSING_TYPE, PRIVATE_STAMMDATEN, PRIVATE_MANGEL, PRIVATE_FOTOS, COMMERCIAL_FLOW = range(5)
 
 PRIVATE = "private"
 COMMERCIAL = "commercial"
@@ -34,7 +35,18 @@ COMMERCIAL = "commercial"
 DATA_DIR = Path("data")
 DATA_DIR.mkdir(exist_ok=True)
 TENANTS_FILE = DATA_DIR / "tenants.json"
-MELDUNGEN_FILE = DATA_DIR / "mangelmeldungen.json"
+SESSIONS_FILE = DATA_DIR / "sessions.json"
+PHOTOS_DIR = DATA_DIR / "photos"
+PHOTOS_DIR.mkdir(exist_ok=True)
+
+PHOTO_REQUEST_TEXT = (
+    "Damit wir den Schaden besser einschätzen können, brauchen wir noch Fotos. "
+    "Bitte schicken Sie die Bilder in dieser Reihenfolge:\n"
+    "1. Ein Übersichtsfoto des gesamten Raumes\n"
+    "2. Ein oder mehrere Detailfotos direkt vom Schaden\n\n"
+    "So kann unser Team den richtigen Handwerker schneller beauftragen.\n\n"
+    'Schreiben Sie "Fertig" wenn Sie alle Bilder geschickt haben.'
+)
 
 STAMMDATEN_FIELDS = [
     ("name", "Wie ist Ihr Name?"),
@@ -45,7 +57,7 @@ STAMMDATEN_FIELDS = [
 ]
 
 MANGEL_PROMPT = """
-Du bist ein freundlicher Assistent der Hausverwaltung und erfasst einen Mangel eines privaten Mieters. Die Stammdaten wurden bereits aufgenommen. 
+Du bist ein freundlicher Assistent der Hausverwaltung und erfasst einen Mangel eines privaten Mieters. Die Stammdaten wurden bereits aufgenommen.
 
 Deine Aufgabe: Erfasse den Mangel so präzise wie möglich.
 
@@ -94,53 +106,86 @@ MANGEL_JSON_RE = re.compile(
 claude = anthropic.AsyncAnthropic()
 
 
-def load_tenants() -> dict:
-    if not TENANTS_FILE.exists():
-        return {}
-    try:
-        data = json.loads(TENANTS_FILE.read_text(encoding="utf-8"))
-        return data if isinstance(data, dict) else {}
-    except json.JSONDecodeError:
-        return {}
+# ---------- helpers ----------
+
+def now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-def get_tenant(user_id: int) -> dict | None:
-    return load_tenants().get(str(user_id))
+def compose_adresse(strasse: str, hausnummer: str, etage: str) -> str:
+    parts = [f"{strasse} {hausnummer}".strip()]
+    if etage:
+        parts.append(f"Etage {etage}")
+    return ", ".join(p for p in parts if p)
 
 
-def save_tenant(user_id: int, data: dict) -> None:
-    tenants = load_tenants()
-    tenants[str(user_id)] = {
-        **data,
-        "schritt": "stammdaten_komplett",
-        "timestamp": datetime.utcnow().isoformat() + "Z",
+def empty_session(chat_id: str, mietertyp: str = "") -> dict:
+    ts = now_iso()
+    return {
+        "session_id": str(uuid.uuid4()),
+        "chat_id": chat_id,
+        "mietertyp": mietertyp,
+        "erstellt_am": ts,
+        "aktualisiert_am": ts,
+        "stammdaten": {"name": "", "adresse": "", "telefon": ""},
+        "mangelerfassung": {
+            "timestamp": "",
+            "status": "offen",
+            "zusammenfassung": "",
+            "art": "",
+            "ausmass": "",
+            "seit": "",
+            "ursache": "",
+        },
+        "bilder": {},
     }
-    TENANTS_FILE.write_text(
-        json.dumps(tenants, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    logger.info("Saved Stammdaten for user_id=%s", user_id)
 
 
-def save_meldung(user_id: int, mangel: dict) -> None:
-    existing: list[dict] = []
-    if MELDUNGEN_FILE.exists():
-        try:
-            loaded = json.loads(MELDUNGEN_FILE.read_text(encoding="utf-8"))
-            if isinstance(loaded, list):
-                existing = loaded
-        except json.JSONDecodeError:
-            existing = []
-    existing.append({
-        "user_id": user_id,
-        "timestamp": datetime.utcnow().isoformat() + "Z",
-        **mangel,
-    })
-    MELDUNGEN_FILE.write_text(
-        json.dumps(existing, ensure_ascii=False, indent=2),
-        encoding="utf-8",
+def _load_json(path: Path, default):
+    if not path.exists():
+        return default
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return default
+
+
+def _write_json(path: Path, data) -> None:
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def load_tenants() -> dict:
+    data = _load_json(TENANTS_FILE, {})
+    return data if isinstance(data, dict) else {}
+
+
+def get_tenant_by_chat(chat_id: str) -> dict | None:
+    return load_tenants().get(str(chat_id))
+
+
+def save_tenant_cache(chat_id: str, stammdaten: dict) -> None:
+    tenants = load_tenants()
+    tenants[str(chat_id)] = {
+        **stammdaten,
+        "aktualisiert_am": now_iso(),
+    }
+    _write_json(TENANTS_FILE, tenants)
+    logger.info("Cached stammdaten for chat_id=%s", chat_id)
+
+
+def upsert_session(session: dict) -> None:
+    sessions = _load_json(SESSIONS_FILE, {})
+    if not isinstance(sessions, dict):
+        sessions = {}
+    session["aktualisiert_am"] = now_iso()
+    sessions[session["session_id"]] = session
+    _write_json(SESSIONS_FILE, sessions)
+    logger.info(
+        "Saved session %s (status=%s, bilder=%d)",
+        session["session_id"][:8],
+        session["mangelerfassung"].get("status"),
+        len(session.get("bilder") or {}),
     )
-    logger.info("Saved Mangelmeldung for user_id=%s", user_id)
 
 
 def extract_mangel(text: str) -> dict | None:
@@ -175,23 +220,40 @@ async def kickoff_mangel(user_data: dict) -> str:
     return reply
 
 
+# ---------- handlers ----------
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    tenant = get_tenant(update.effective_user.id)
-    if tenant:
+    chat_id = str(update.effective_chat.id)
+    cached = get_tenant_by_chat(chat_id)
+
+    if cached:
+        session = empty_session(chat_id, mietertyp="privat")
+        session["stammdaten"] = {
+            "name": cached.get("name", ""),
+            "adresse": cached.get("adresse", ""),
+            "telefon": cached.get("telefon", ""),
+        }
+        upsert_session(session)
+        context.user_data["session"] = session
+
         try:
             kickoff = await kickoff_mangel(context.user_data)
         except anthropic.APIError as e:
             logger.exception("Claude API error on returning-user kickoff")
             await update.message.reply_text(
-                f"Willkommen zurück, {tenant.get('name', '')}! Leider ist der Assistent "
+                f"Willkommen zurück, {cached.get('name', '')}! Leider ist der Assistent "
                 f"gerade nicht erreichbar ({e.__class__.__name__}). Bitte versuchen Sie es gleich noch einmal."
             )
             return ConversationHandler.END
+
         await update.message.reply_html(
-            f"Willkommen zurück, <b>{tenant.get('name', '')}</b>! Wir haben Ihre Stammdaten bereits.\n\n"
+            f"Willkommen zurück, <b>{cached.get('name', '')}</b>! Wir haben Ihre Stammdaten bereits.\n\n"
             f"{kickoff}"
         )
         return PRIVATE_MANGEL
+
+    # New tenant
+    context.user_data["session"] = empty_session(chat_id)
 
     keyboard = [
         [
@@ -212,14 +274,25 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 async def choose_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
-    context.user_data["tenant_type"] = query.data
+
+    session = context.user_data.setdefault(
+        "session", empty_session(str(update.effective_chat.id))
+    )
+    session["mietertyp"] = "privat" if query.data == PRIVATE else "gewerblich"
+    upsert_session(session)
 
     if query.data == PRIVATE:
-        context.user_data["stammdaten"] = {}
+        context.user_data["stammdaten_buffer"] = {
+            "name": "",
+            "strasse": "",
+            "hausnummer": "",
+            "etage": "",
+            "telefon": "",
+        }
         context.user_data["field_index"] = 0
-        first_question = STAMMDATEN_FIELDS[0][1]
         await query.edit_message_text(
-            "Danke! Ich nehme jetzt kurz Ihre Stammdaten auf.\n\n" + first_question
+            "Danke! Ich nehme jetzt kurz Ihre Stammdaten auf.\n\n"
+            + STAMMDATEN_FIELDS[0][1]
         )
         return PRIVATE_STAMMDATEN
 
@@ -237,9 +310,10 @@ async def private_stammdaten(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.message.reply_text("Bitte geben Sie eine Antwort ein.")
         return PRIVATE_STAMMDATEN
 
+    buffer = context.user_data["stammdaten_buffer"]
     index = context.user_data.get("field_index", 0)
     field_key, _ = STAMMDATEN_FIELDS[index]
-    context.user_data["stammdaten"][field_key] = answer
+    buffer[field_key] = answer
 
     next_index = index + 1
     if next_index < len(STAMMDATEN_FIELDS):
@@ -247,15 +321,24 @@ async def private_stammdaten(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.message.reply_text(STAMMDATEN_FIELDS[next_index][1])
         return PRIVATE_STAMMDATEN
 
-    data = context.user_data["stammdaten"]
-    save_tenant(update.effective_user.id, data)
+    # All Stammdaten collected — map into new schema
+    stammdaten = {
+        "name": buffer["name"],
+        "adresse": compose_adresse(buffer["strasse"], buffer["hausnummer"], buffer["etage"]),
+        "telefon": buffer["telefon"],
+    }
+
+    chat_id = str(update.effective_chat.id)
+    session = context.user_data["session"]
+    session["stammdaten"] = stammdaten
+    upsert_session(session)
+    save_tenant_cache(chat_id, stammdaten)
+
     summary = (
         "Vielen Dank, ich habe Ihre Stammdaten notiert:\n"
-        f"• Name: {data['name']}\n"
-        f"• Straße: {data['strasse']}\n"
-        f"• Hausnummer: {data['hausnummer']}\n"
-        f"• Etage: {data['etage']}\n"
-        f"• Telefon: {data['telefon']}"
+        f"• Name: {stammdaten['name']}\n"
+        f"• Adresse: {stammdaten['adresse']}\n"
+        f"• Telefon: {stammdaten['telefon']}"
     )
 
     try:
@@ -289,19 +372,82 @@ async def private_mangel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     messages.append({"role": "assistant", "content": reply})
 
-    data = extract_mangel(reply)
-    if data:
-        save_meldung(update.effective_user.id, data)
+    parsed = extract_mangel(reply)
+    if parsed:
+        session = context.user_data["session"]
+        session["mangelerfassung"] = {
+            "timestamp": now_iso(),
+            "status": "komplett",
+            "zusammenfassung": parsed.get("zusammenfassung", ""),
+            "art": parsed.get("art", ""),
+            "ausmass": parsed.get("ausmass", ""),
+            "seit": parsed.get("seit", ""),
+            "ursache": parsed.get("ursache", ""),
+        }
+        # NB: schema doesn't include "ort"; we keep it inside zusammenfassung text
+        upsert_session(session)
+
         visible = strip_mangel_json(reply)
         if visible:
             await update.message.reply_text(visible)
-        await update.message.reply_text(
-            "Ihre Mangelmeldung wurde aufgenommen. Wir melden uns zeitnah bei Ihnen."
-        )
-        return ConversationHandler.END
+        await update.message.reply_text(PHOTO_REQUEST_TEXT)
+        return PRIVATE_FOTOS
 
     await update.message.reply_text(reply)
     return PRIVATE_MANGEL
+
+
+async def private_fotos(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    message = update.message
+    session = context.user_data.get("session")
+    if session is None:
+        await message.reply_text("Sitzung nicht gefunden. Bitte starten Sie mit /start neu.")
+        return ConversationHandler.END
+
+    bilder = session.setdefault("bilder", {})
+
+    if message.photo:
+        photo = message.photo[-1]
+        try:
+            file = await photo.get_file()
+        except Exception:
+            logger.exception("Failed to get_file from Telegram")
+            await message.reply_text("Das Bild konnte nicht geladen werden. Bitte erneut senden.")
+            return PRIVATE_FOTOS
+
+        chat_id = str(update.effective_chat.id)
+        chat_dir = PHOTOS_DIR / chat_id
+        chat_dir.mkdir(parents=True, exist_ok=True)
+
+        index = len(bilder)
+        slot = "bild_allgemein" if index == 0 else f"bild_{index}"
+        timestamp = datetime.utcnow().strftime("%Y%m%dT%H%M%S")
+        path = chat_dir / f"{session['session_id'][:8]}_{slot}_{timestamp}.jpg"
+        await file.download_to_drive(custom_path=str(path))
+
+        bilder[slot] = str(path)
+        upsert_session(session)
+
+        label = "Übersichtsfoto" if slot == "bild_allgemein" else f"Detailfoto {index}"
+        await message.reply_text(
+            f'{label} gespeichert. Senden Sie weitere Fotos oder schreiben Sie „Fertig".'
+        )
+        return PRIVATE_FOTOS
+
+    text = (message.text or "").strip().lower()
+    if text == "fertig":
+        upsert_session(session)
+        anzahl = len(bilder)
+        await message.reply_text(
+            f"Vielen Dank! Ihre Mangelmeldung mit {anzahl} Foto(s) wurde aufgenommen. "
+            "Wir melden uns zeitnah bei Ihnen."
+        )
+        return ConversationHandler.END
+
+    await message.reply_text(
+        'Bitte senden Sie ein Foto oder schreiben Sie „Fertig", wenn Sie alle Bilder geschickt haben.'
+    )
+    return PRIVATE_FOTOS
 
 
 async def commercial_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -309,7 +455,7 @@ async def commercial_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     text = update.message.text
     context.user_data.setdefault("commercial_messages", []).append(text)
     await update.message.reply_text(
-        f"[Gewerbe-Workflow] Eingang bestätigt:\n„{text}“\n\nNächster Schritt folgt …"
+        f'[Gewerbe-Workflow] Eingang bestätigt:\n„{text}"\n\nNächster Schritt folgt …'
     )
     return COMMERCIAL_FLOW
 
@@ -345,6 +491,9 @@ def main() -> None:
             ],
             PRIVATE_MANGEL: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, private_mangel)
+            ],
+            PRIVATE_FOTOS: [
+                MessageHandler(filters.PHOTO | (filters.TEXT & ~filters.COMMAND), private_fotos)
             ],
             COMMERCIAL_FLOW: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, commercial_flow)

@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Vorgang Detail View</title>
+<!-- Fonts -->
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet"/>
+<!-- Material Symbols -->
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Tailwind CSS -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<!-- Theme Configuration -->
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                            "on-surface-variant": "#44474e",
+                            "secondary-container": "#ffdc8e",
+                            "on-tertiary-fixed": "#281800",
+                            "on-secondary-fixed-variant": "#5a4302",
+                            "tertiary-fixed-dim": "#e7c18a",
+                            "tertiary-container": "#3d2700",
+                            "primary-container": "#1a2b4a",
+                            "secondary-fixed": "#ffdf9b",
+                            "on-tertiary-container": "#af8d5b",
+                            "surface-tint": "#4e5e80",
+                            "on-secondary": "#ffffff",
+                            "error": "#ba1a1a",
+                            "on-tertiary": "#ffffff",
+                            "primary": "#031634",
+                            "secondary": "#745b1b",
+                            "on-surface": "#1b1b1e",
+                            "inverse-surface": "#303033",
+                            "surface-bright": "#fbf8fc",
+                            "surface-container": "#efedf0",
+                            "secondary-fixed-dim": "#e4c278",
+                            "inverse-on-surface": "#f2f0f3",
+                            "surface-container-low": "#f5f3f6",
+                            "outline": "#75777e",
+                            "inverse-primary": "#b6c6ee",
+                            "tertiary": "#221400",
+                            "on-primary-fixed": "#081b39",
+                            "surface-variant": "#e4e2e5",
+                            "on-secondary-fixed": "#251a00",
+                            "surface": "#fbf8fc",
+                            "on-error-container": "#93000a",
+                            "background": "#fbf8fc",
+                            "on-primary-fixed-variant": "#364767",
+                            "error-container": "#ffdad6",
+                            "primary-fixed-dim": "#b6c6ee",
+                            "on-primary-container": "#8293b7",
+                            "on-secondary-container": "#795f1f",
+                            "surface-container-highest": "#e4e2e5",
+                            "surface-dim": "#dbd9dc",
+                            "surface-container-lowest": "#ffffff",
+                            "on-error": "#ffffff",
+                            "surface-container-high": "#e9e7eb",
+                            "on-primary": "#ffffff",
+                            "tertiary-fixed": "#ffddaf",
+                            "on-tertiary-fixed-variant": "#5c4217",
+                            "primary-fixed": "#d8e2ff",
+                            "outline-variant": "#c5c6cf",
+                            "on-background": "#1b1b1e"
+                    },
+                    "borderRadius": {
+                            "DEFAULT": "0.25rem",
+                            "lg": "0.5rem",
+                            "xl": "0.75rem",
+                            "full": "9999px"
+                    },
+                    "spacing": {
+                            "sm": "12px",
+                            "gutter": "24px",
+                            "xl": "64px",
+                            "base": "8px",
+                            "margin-desktop": "48px",
+                            "lg": "40px",
+                            "md": "24px",
+                            "margin-mobile": "16px",
+                            "xs": "4px"
+                    },
+                    "fontFamily": {
+                            "body-lg": ["Inter"],
+                            "body-md": ["Inter"],
+                            "h2": ["Inter"],
+                            "label-sm": ["Inter"],
+                            "body-sm": ["Inter"],
+                            "label-md": ["Inter"],
+                            "h3": ["Inter"],
+                            "h1": ["Inter"]
+                    },
+                    "fontSize": {
+                            "body-lg": ["18px", {"lineHeight": "1.6", "letterSpacing": "0", "fontWeight": "400"}],
+                            "body-md": ["16px", {"lineHeight": "1.5", "letterSpacing": "0", "fontWeight": "400"}],
+                            "h2": ["24px", {"lineHeight": "1.3", "letterSpacing": "-0.01em", "fontWeight": "600"}],
+                            "label-sm": ["12px", {"lineHeight": "1", "letterSpacing": "0.02em", "fontWeight": "500"}],
+                            "body-sm": ["14px", {"lineHeight": "1.5", "letterSpacing": "0", "fontWeight": "400"}],
+                            "label-md": ["14px", {"lineHeight": "1", "letterSpacing": "0.01em", "fontWeight": "500"}],
+                            "h3": ["20px", {"lineHeight": "1.4", "letterSpacing": "0", "fontWeight": "600"}],
+                            "h1": ["32px", {"lineHeight": "1.2", "letterSpacing": "-0.02em", "fontWeight": "600"}]
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-background text-on-background antialiased flex">
+<!-- NavigationDrawer (Shared Component) -->
+<nav class="bg-[#1a2b4a] dark:bg-slate-950 font-sans text-sm font-medium h-screen w-64 fixed left-0 top-0 border-r border-slate-700 shadow-xl flex flex-col h-full py-6 z-50 hidden md:flex">
+<div class="px-6 mb-8 flex items-center gap-3">
+<div class="w-10 h-10 rounded-full bg-slate-800 flex items-center justify-center text-white font-bold">LA</div>
+<div>
+<div class="text-gold-500 font-bold uppercase tracking-widest text-xs">Rahlfs Cockpit</div>
+<div class="text-slate-400 text-xs mt-1">Property Management</div>
+</div>
+</div>
+<ul class="flex flex-col gap-1 w-full">
+<li><a class="text-slate-400 hover:text-white px-4 py-3 flex items-center gap-3 hover:bg-white/5 transition-all cursor-pointer duration-150" href="#"><span class="material-symbols-outlined">dashboard</span>Dashboard</a></li>
+<li><a class="text-slate-400 hover:text-white px-4 py-3 flex items-center gap-3 hover:bg-white/5 transition-all cursor-pointer duration-150" href="#"><span class="material-symbols-outlined">location_city</span>Portfolio</a></li>
+<li><a class="text-slate-400 hover:text-white px-4 py-3 flex items-center gap-3 hover:bg-white/5 transition-all cursor-pointer duration-150" href="#"><span class="material-symbols-outlined">groups</span>Tenants</a></li>
+<li><a class="text-slate-400 hover:text-white px-4 py-3 flex items-center gap-3 hover:bg-white/5 transition-all cursor-pointer duration-150" href="#"><span class="material-symbols-outlined">payments</span>Finance</a></li>
+<li><a class="bg-white/10 text-white border-l-4 border-amber-500 px-4 py-3 flex items-center gap-3 hover:bg-white/5 transition-all cursor-pointer duration-150" href="#"><span class="material-symbols-outlined">handyman</span>Maintenance</a></li>
+<li><a class="text-slate-400 hover:text-white px-4 py-3 flex items-center gap-3 hover:bg-white/5 transition-all cursor-pointer duration-150" href="#"><span class="material-symbols-outlined">assessment</span>Reports</a></li>
+</ul>
+</nav>
+<!-- Main Content Wrapper -->
+<div class="flex-1 ml-0 md:ml-64 flex flex-col min-h-screen">
+<!-- TopAppBar (Medium) -->
+<header class="bg-white dark:bg-slate-900 text-[#1a2b4a] dark:text-slate-100 font-sans text-2xl font-bold tracking-tight w-full sticky top-0 z-40 border-b border-slate-200 dark:border-slate-800 flat no shadows flex justify-between items-center px-8 h-20 transition-all duration-200">
+<div class="flex items-center gap-4">
+<button class="text-[#1a2b4a] hover:bg-slate-50 dark:hover:bg-slate-800 p-2 rounded-full transition-colors"><span class="material-symbols-outlined">search</span></button>
+<h1 class="text-[#1a2b4a] font-black">Operational Overview</h1>
+</div>
+<button class="bg-primary text-on-primary font-label-md text-label-md px-6 py-2 rounded-lg hover:opacity-90 transition-opacity">New Case</button>
+</header>
+<!-- Page ContentCanvas -->
+<main class="flex-1 p-margin-desktop bg-surface-container-low">
+<!-- Page Header & Actions -->
+<div class="flex justify-between items-start mb-lg">
+<div>
+<div class="flex items-center gap-2 mb-2">
+<span class="font-label-sm text-label-sm text-on-surface-variant uppercase tracking-wider">Vorgang Detail</span>
+<span class="w-1 h-1 rounded-full bg-outline-variant"></span>
+<span class="font-label-sm text-label-sm text-on-surface-variant">Erstellt heute, 08:14</span>
+</div>
+<h2 class="font-h1 text-h1 text-on-surface">Vorgang 02843 — Wasserschaden Balkon</h2>
+</div>
+<div class="flex gap-sm">
+<button class="bg-surface-container-lowest border border-outline-variant text-primary font-label-md text-label-md px-4 py-2 rounded-lg hover:bg-surface-container transition-colors flex items-center gap-2">
+<span class="material-symbols-outlined text-[18px]">picture_as_pdf</span>
+                        PDF generieren
+                    </button>
+<button class="bg-surface-container-lowest border border-outline-variant text-primary font-label-md text-label-md px-4 py-2 rounded-lg hover:bg-surface-container transition-colors flex items-center gap-2">
+<span class="material-symbols-outlined text-[18px]">send</span>
+                        An Objektverantwortlichen senden
+                    </button>
+<button class="bg-primary text-on-primary font-label-md text-label-md px-4 py-2 rounded-lg hover:opacity-90 transition-opacity flex items-center gap-2 shadow-sm">
+<span class="material-symbols-outlined text-[18px]">engineering</span>
+                        Handwerker zuweisen
+                    </button>
+</div>
+</div>
+<!-- Main Grid -->
+<div class="grid grid-cols-12 gap-gutter">
+<!-- Left Column: Structured Data -->
+<div class="col-span-12 lg:col-span-8 flex flex-col gap-gutter">
+<!-- Details Card -->
+<div class="bg-surface-container-lowest rounded-xl border border-outline-variant p-md">
+<h3 class="font-h3 text-h3 text-on-surface mb-md pb-sm border-b border-surface-variant flex items-center gap-2">
+<span class="material-symbols-outlined text-outline">info</span>
+                            Meldungsdetails
+                        </h3>
+<div class="grid grid-cols-2 gap-y-md gap-x-gutter mb-lg">
+<div>
+<label class="block font-label-sm text-label-sm text-on-surface-variant mb-1">Mieter</label>
+<div class="font-body-md text-body-md text-on-surface flex items-center gap-2">
+<div class="w-6 h-6 rounded-full bg-primary-container text-on-primary-container flex items-center justify-center font-label-sm text-[10px]">AM</div>
+                                    Anna Müller
+                                </div>
+</div>
+<div>
+<label class="block font-label-sm text-label-sm text-on-surface-variant mb-1">Priorität</label>
+<div class="font-body-md text-body-md text-on-surface flex items-center gap-2">
+<span class="w-2 h-2 rounded-full bg-outline"></span>
+                                    Normal
+                                </div>
+</div>
+<div>
+<label class="block font-label-sm text-label-sm text-on-surface-variant mb-1">Adresse</label>
+<div class="font-body-md text-body-md text-on-surface">Goethestraße 45</div>
+</div>
+<div>
+<label class="block font-label-sm text-label-sm text-on-surface-variant mb-1">Hausnummer / Etage</label>
+<div class="font-body-md text-body-md text-on-surface">Haus 2, 3. OG links</div>
+</div>
+<div>
+<label class="block font-label-sm text-label-sm text-on-surface-variant mb-1">Mangel Kategorie</label>
+<div class="font-body-md text-body-md text-on-surface">Wasser &amp; Sanitär</div>
+</div>
+<div>
+<label class="block font-label-sm text-label-sm text-on-surface-variant mb-1">Zeitpunkt der Feststellung</label>
+<div class="font-body-md text-body-md text-on-surface">Gestern Abend, ca. 20:00 Uhr</div>
+</div>
+</div>
+<div>
+<label class="block font-label-sm text-label-sm text-on-surface-variant mb-2">Beschreibung</label>
+<p class="font-body-md text-body-md text-on-surface bg-surface p-sm rounded-lg border border-surface-variant">
+                                Wasser tropft von der Decke auf dem Balkon. Es scheint vom Balkon darüber zu kommen. Der Boden ist bereits nass und es bildet sich eine kleine Pfütze nahe der Hauswand.
+                            </p>
+</div>
+</div>
+<!-- Voice Transcript Card -->
+<div class="bg-surface-container-lowest rounded-xl border border-outline-variant p-md">
+<div class="flex items-center justify-between mb-md pb-sm border-b border-surface-variant">
+<h3 class="font-h3 text-h3 text-on-surface flex items-center gap-2">
+<span class="material-symbols-outlined text-outline">transcribe</span>
+                                KI-Transkription (Voice Note)
+                            </h3>
+<span class="bg-primary-fixed text-on-primary-fixed-variant font-label-sm text-[10px] px-2 py-1 rounded-full">Automatisch erfasst</span>
+</div>
+<div class="flex gap-4 items-start">
+<span class="material-symbols-outlined text-outline-variant mt-1">format_quote</span>
+<p class="font-body-md text-body-md text-on-surface-variant italic leading-relaxed">
+                                "Ja hallo, hier ist Anna Müller aus der Goethestraße. Ich wollte nur kurz Bescheid sagen, dass auf meinem Balkon Wasser von oben runter tropft. Das fing gestern Abend an. Es ist noch nicht super viel, aber der Boden ist nass und ich mache mir Sorgen wegen der Fassade. Könnten Sie da mal jemanden schicken? Danke."
+                            </p>
+</div>
+</div>
+</div>
+<!-- Right Column: Media & Logs -->
+<div class="col-span-12 lg:col-span-4 flex flex-col gap-gutter">
+<!-- Media Gallery Card -->
+<div class="bg-surface-container-lowest rounded-xl border border-outline-variant p-md flex flex-col gap-4">
+<h3 class="font-label-md text-label-md text-on-surface-variant flex items-center gap-2 uppercase tracking-wider">
+<span class="material-symbols-outlined text-[16px]">photo_camera</span>
+                            Anhang (1)
+                        </h3>
+<div class="relative w-full h-48 rounded-lg overflow-hidden border border-outline-variant group cursor-pointer">
+<img class="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105" data-alt="A close-up photograph showing a concrete balcony ceiling with distinct water damage. The surface is stained with dark, irregular damp patches and small water droplets are visible forming on the concrete. The lighting is overcast, creating a muted, slightly dreary mood typical of a property defect report. The image is framed to emphasize the texture of the wet concrete and the progression of the leak, fitting a professional B2B context for maintenance documentation." src="https://lh3.googleusercontent.com/aida-public/AB6AXuDuPUptUfppG-mQlg9zzMjLd0xRf7EjhWEz5cxJzZ3cTaOTsc4Kb_so40CBgzevW0lbz4b3BwD0jTqOlsEKa7jxzLN8B2AvEF-XM_rpzvI2Heo0r9lJixnUNSPkjbolwkYCwwCN2e6BGz4In-Gr97nII0bGQFdBa_otO5d_Wj_81xIz3l-lJW_jK9H8b48C2p1D5jls09-6DHUArT_5o_lgqbQrpPDFxcSvERIZV75pgVN8RjtrOKT4-7_fZ0jQkv2O5t6f_q2-jR8"/>
+<div class="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+<span class="material-symbols-outlined text-white text-3xl drop-shadow-md">zoom_in</span>
+</div>
+</div>
+<!-- Audio Player UI -->
+<div class="bg-surface rounded-lg p-3 border border-surface-variant flex items-center gap-3">
+<button class="w-8 h-8 rounded-full bg-primary text-on-primary flex items-center justify-center shrink-0 hover:opacity-90">
+<span class="material-symbols-outlined text-[18px] ml-0.5" style="font-variation-settings: 'FILL' 1;">play_arrow</span>
+</button>
+<div class="flex-1 flex flex-col gap-1">
+<div class="flex justify-between font-label-sm text-[10px] text-on-surface-variant">
+<span>0:00</span>
+<span>0:24</span>
+</div>
+<div class="h-1.5 w-full bg-surface-variant rounded-full overflow-hidden">
+<div class="h-full bg-primary w-1/4 rounded-full"></div>
+</div>
+</div>
+</div>
+</div>
+<!-- Audit Log Card -->
+<div class="bg-surface-container-lowest rounded-xl border border-outline-variant p-md flex-1">
+<h3 class="font-label-md text-label-md text-on-surface-variant flex items-center gap-2 uppercase tracking-wider mb-lg">
+<span class="material-symbols-outlined text-[16px]">history</span>
+                            Verlauf
+                        </h3>
+<div class="relative pl-3 border-l border-surface-variant flex flex-col gap-6">
+<!-- Log Item 1 -->
+<div class="relative">
+<span class="absolute -left-[17px] top-1 w-2.5 h-2.5 rounded-full bg-primary border-2 border-surface-container-lowest"></span>
+<div class="pl-4">
+<div class="font-label-md text-label-md text-on-surface">KI-Erfassung abgeschlossen</div>
+<div class="font-body-sm text-body-sm text-on-surface-variant mt-0.5">Daten strukturiert und Vorgang angelegt.</div>
+<div class="font-label-sm text-[11px] text-outline mt-1">Heute, 08:14</div>
+</div>
+</div>
+<!-- Log Item 2 -->
+<div class="relative">
+<span class="absolute -left-[17px] top-1 w-2.5 h-2.5 rounded-full bg-surface-variant border-2 border-surface-container-lowest"></span>
+<div class="pl-4">
+<div class="font-label-md text-label-md text-on-surface">Voice Note empfangen</div>
+<div class="font-body-sm text-body-sm text-on-surface-variant mt-0.5">Eingang via Mieter-App.</div>
+<div class="font-label-sm text-[11px] text-outline mt-1">Heute, 08:12</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</main>
+</div>
+</body></html>
