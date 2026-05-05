@@ -17,3 +17,19 @@ export async function fetchStats() {
   if (!r.ok) throw new Error(`GET /api/stats failed: ${r.status}`)
   return r.json()
 }
+
+export async function fetchHandwerker(caseId) {
+  const r = await fetch(`${BASE}/api/cases/${caseId}/handwerker`)
+  if (!r.ok) throw new Error(`GET handwerker failed: ${r.status}`)
+  return r.json()
+}
+
+export async function assignHandwerker(caseId, handwerkerId) {
+  const r = await fetch(`${BASE}/api/cases/${caseId}/assign_handwerker`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ handwerker_id: handwerkerId }),
+  })
+  if (!r.ok) throw new Error(`POST assign_handwerker failed: ${r.status}`)
+  return r.json()
+}

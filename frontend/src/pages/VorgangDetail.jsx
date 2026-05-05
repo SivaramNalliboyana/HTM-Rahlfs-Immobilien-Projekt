@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { fetchCase } from '../api'
+import { assignHandwerker, fetchCase, fetchHandwerker } from '../api'
 import PdfPreview from '../components/PdfPreview'
 
 const PRIORITY_LABEL = {
@@ -35,6 +35,7 @@ export default function VorgangDetail() {
   const [data, setData] = useState(null)
   const [error, setError] = useState(null)
   const [showPdf, setShowPdf] = useState(false)
+  const [showHandwerker, setShowHandwerker] = useState(false)
 
   useEffect(() => {
     let active = true
@@ -128,15 +129,21 @@ export default function VorgangDetail() {
             <span className="material-symbols-outlined text-[18px]">send</span>
             An Objektverantwortlichen senden
           </button>
-          <button className="bg-primary text-on-primary text-label-md px-4 py-2 rounded-lg hover:opacity-90 transition-opacity flex items-center gap-2 shadow-sm">
+          <button
+            onClick={() => setShowHandwerker(true)}
+            className="bg-primary text-on-primary text-label-md px-4 py-2 rounded-lg hover:opacity-90 transition-opacity flex items-center gap-2 shadow-sm"
+          >
             <span className="material-symbols-outlined text-[18px]">engineering</span>
-            Handwerker zuweisen
+            {data.handwerker ? 'Handwerker neu zuweisen' : 'Handwerker zuweisen'}
           </button>
         </div>
       </div>
 
       <div className="grid grid-cols-12 gap-gutter">
         <div className="col-span-12 lg:col-span-8 flex flex-col gap-gutter">
+          {data.handwerker && (
+            <HandwerkerStatusCard handwerker={data.handwerker} termine={data.termine} />
+          )}
           <TriageCard triage={triage} pending={triagePending} />
 
           <div className="bg-surface-container-lowest rounded-xl border border-outline-variant p-md">
@@ -281,6 +288,221 @@ export default function VorgangDetail() {
       </div>
 
       {showPdf && <PdfPreview caseData={data} onClose={() => setShowPdf(false)} />}
+      {showHandwerker && (
+        <HandwerkerModal
+          caseId={data.id}
+          onClose={() => setShowHandwerker(false)}
+          onAssigned={(updated) => {
+            setData(updated)
+            setShowHandwerker(false)
+          }}
+        />
+      )}
+    </div>
+  )
+}
+
+function HandwerkerStatusCard({ handwerker, termine }) {
+  const ausgewaehlt = termine?.ausgewaehlt
+  const vorgeschlagen = termine?.vorgeschlagen || []
+  return (
+    <div className="bg-surface-container-lowest rounded-xl border border-outline-variant p-md">
+      <div className="flex items-start justify-between mb-md pb-sm border-b border-surface-variant">
+        <h3 className="text-h3 text-on-surface flex items-center gap-2">
+          <span className="material-symbols-outlined text-primary-container">engineering</span>
+          Zugewiesener Handwerker
+        </h3>
+        <span className="px-3 py-1 rounded-full text-label-sm font-medium bg-secondary/15 text-on-secondary-container border border-secondary/30 flex items-center gap-1">
+          <span className="material-symbols-outlined text-[14px]">task_alt</span>
+          Beauftragt
+        </span>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-md mb-md">
+        <div>
+          <p className="text-label-sm text-on-surface-variant uppercase tracking-wider mb-1">Betrieb</p>
+          <p className="text-body-md text-on-surface font-medium">{handwerker.name}</p>
+        </div>
+        <div>
+          <p className="text-label-sm text-on-surface-variant uppercase tracking-wider mb-1">Gewerk</p>
+          <p className="text-body-md text-on-surface">{handwerker.gewerk}</p>
+        </div>
+        <div>
+          <p className="text-label-sm text-on-surface-variant uppercase tracking-wider mb-1">Telefon</p>
+          <p className="text-body-md text-on-surface">{handwerker.telefon}</p>
+        </div>
+        <div>
+          <p className="text-label-sm text-on-surface-variant uppercase tracking-wider mb-1">Beauftragt am</p>
+          <p className="text-body-md text-on-surface">{formatTs(handwerker.assigned_at)}</p>
+        </div>
+      </div>
+      <div>
+        <p className="text-label-sm text-on-surface-variant uppercase tracking-wider mb-2">Terminwahl des Mieters</p>
+        {ausgewaehlt ? (
+          <div className="p-sm rounded-lg bg-secondary/10 text-on-secondary-container border border-secondary/30 flex items-center gap-2">
+            <span className="material-symbols-outlined text-[18px]">event_available</span>
+            <span className="text-body-md font-medium">{ausgewaehlt.label}</span>
+          </div>
+        ) : (
+          <div className="p-sm rounded-lg bg-surface-variant text-on-surface-variant border border-outline-variant/40 flex items-center gap-2">
+            <span className="material-symbols-outlined text-[18px] animate-pulse">hourglass_top</span>
+            <span className="text-body-sm">
+              {vorgeschlagen.length} Termine wurden dem Mieter via Telegram gesendet — wartet auf Auswahl.
+            </span>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function HandwerkerModal({ caseId, onClose, onAssigned }) {
+  const [items, setItems] = useState(null)
+  const [category, setCategory] = useState('')
+  const [error, setError] = useState(null)
+  const [selected, setSelected] = useState(null)
+  const [submitting, setSubmitting] = useState(false)
+
+  useEffect(() => {
+    let active = true
+    fetchHandwerker(caseId)
+      .then((d) => {
+        if (!active) return
+        setItems(d.recommendations || [])
+        setCategory(d.category || '')
+      })
+      .catch((e) => {
+        if (active) setError(e.message)
+      })
+    return () => {
+      active = false
+    }
+  }, [caseId])
+
+  async function handleAssign() {
+    if (!selected || submitting) return
+    setSubmitting(true)
+    try {
+      const updated = await assignHandwerker(caseId, selected)
+      onAssigned(updated)
+    } catch (e) {
+      setError(e.message)
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div
+        className="bg-surface-container-lowest rounded-xl border border-outline-variant shadow-xl max-w-3xl w-full max-h-[90vh] overflow-hidden flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="px-md py-4 border-b border-outline-variant flex items-center justify-between">
+          <div>
+            <h3 className="text-h3 text-on-surface flex items-center gap-2">
+              <span className="material-symbols-outlined text-primary-container">engineering</span>
+              Empfohlene Handwerker
+            </h3>
+            <p className="text-label-sm text-on-surface-variant mt-1">
+              Kategorie: <span className="font-medium">{category || '—'}</span> · Sortiert nach Bewertung & Entfernung
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            className="text-on-surface-variant hover:text-on-surface p-1 rounded"
+          >
+            <span className="material-symbols-outlined">close</span>
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-md">
+          {error && (
+            <div className="bg-error-container text-on-error-container p-sm rounded-lg mb-md">
+              {error}
+            </div>
+          )}
+          {!items && !error && (
+            <div className="text-on-surface-variant flex items-center gap-2">
+              <span className="material-symbols-outlined animate-spin">progress_activity</span>
+              Lade Empfehlungen…
+            </div>
+          )}
+          {items && items.length === 0 && (
+            <div className="text-on-surface-variant italic">Keine Handwerker verfügbar.</div>
+          )}
+          {items && items.length > 0 && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {items.map((h) => {
+                const isSelected = selected === h.id
+                const isMatch = h.gewerk === category
+                return (
+                  <button
+                    key={h.id}
+                    onClick={() => setSelected(h.id)}
+                    className={`text-left p-md rounded-lg border transition-all ${
+                      isSelected
+                        ? 'border-primary bg-primary/5 shadow-sm'
+                        : 'border-outline-variant bg-surface hover:border-primary/50'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between mb-2">
+                      <div>
+                        <p className="text-body-md font-medium text-on-surface">{h.name}</p>
+                        <p className="text-label-sm text-on-surface-variant">{h.gewerk}</p>
+                      </div>
+                      {isMatch && (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-secondary/20 text-on-secondary-container border border-secondary/30 whitespace-nowrap">
+                          Bestmatch
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-body-sm text-on-surface-variant mb-2 line-clamp-2">
+                      {h.beschreibung}
+                    </p>
+                    <div className="flex items-center gap-3 text-[12px] text-on-surface-variant">
+                      <span className="flex items-center gap-1">
+                        <span className="material-symbols-outlined text-[14px] text-amber-500">star</span>
+                        {h.rating}
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <span className="material-symbols-outlined text-[14px]">euro</span>
+                        {h.stundensatz}/h
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <span className="material-symbols-outlined text-[14px]">location_on</span>
+                        {h.distance_km} km
+                      </span>
+                    </div>
+                  </button>
+                )
+              })}
+            </div>
+          )}
+        </div>
+
+        <div className="px-md py-4 border-t border-outline-variant flex items-center justify-between bg-surface-container-low">
+          <p className="text-label-sm text-on-surface-variant">
+            Nach der Auswahl erhält der Mieter automatisch 4 Terminvorschläge per Telegram.
+          </p>
+          <div className="flex gap-2">
+            <button
+              onClick={onClose}
+              className="px-4 py-2 rounded-lg border border-outline-variant text-on-surface hover:bg-surface-container text-label-md"
+            >
+              Abbrechen
+            </button>
+            <button
+              onClick={handleAssign}
+              disabled={!selected || submitting}
+              className="px-4 py-2 rounded-lg bg-primary text-on-primary text-label-md flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed hover:opacity-90"
+            >
+              {submitting && (
+                <span className="material-symbols-outlined animate-spin text-[18px]">progress_activity</span>
+              )}
+              Beauftragen & Termine senden
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   )
 }

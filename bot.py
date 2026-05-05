@@ -45,8 +45,17 @@ PHOTO_REQUEST_TEXT = (
     "1. Ein Übersichtsfoto des gesamten Raumes\n"
     "2. Ein oder mehrere Detailfotos direkt vom Schaden\n\n"
     "So kann unser Team den richtigen Handwerker schneller beauftragen.\n\n"
-    'Schreiben Sie "Fertig" wenn Sie alle Bilder geschickt haben.'
+    "Sobald Sie alle Bilder geschickt haben, klicken Sie unten auf den Fertig-Button."
 )
+
+FOTOS_FERTIG_CALLBACK = "fotos_fertig"
+TIMING_CALLBACK_PREFIX = "timing:"
+
+
+def _fertig_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [[InlineKeyboardButton("✅ Fertig", callback_data=FOTOS_FERTIG_CALLBACK)]]
+    )
 
 STAMMDATEN_FIELDS = [
     ("name", "Wie ist Ihr Name?"),
@@ -430,24 +439,90 @@ async def private_fotos(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
 
         label = "Übersichtsfoto" if slot == "bild_allgemein" else f"Detailfoto {index}"
         await message.reply_text(
-            f'{label} gespeichert. Senden Sie weitere Fotos oder schreiben Sie „Fertig".'
+            f"{label} gespeichert. Senden Sie weitere Fotos oder klicken Sie unten auf Fertig.",
+            reply_markup=_fertig_keyboard(),
         )
         return PRIVATE_FOTOS
 
     text = (message.text or "").strip().lower()
     if text == "fertig":
-        upsert_session(session)
-        anzahl = len(bilder)
-        await message.reply_text(
-            f"Vielen Dank! Ihre Mangelmeldung mit {anzahl} Foto(s) wurde aufgenommen. "
-            "Wir melden uns zeitnah bei Ihnen."
-        )
-        return ConversationHandler.END
+        return await _finalize_fotos(session, reply=message.reply_text)
 
     await message.reply_text(
-        'Bitte senden Sie ein Foto oder schreiben Sie „Fertig", wenn Sie alle Bilder geschickt haben.'
+        "Bitte senden Sie ein Foto oder klicken Sie auf den Fertig-Button, wenn Sie alle Bilder geschickt haben.",
+        reply_markup=_fertig_keyboard() if bilder else None,
     )
     return PRIVATE_FOTOS
+
+
+async def _finalize_fotos(session: dict, reply) -> int:
+    upsert_session(session)
+    anzahl = len(session.get("bilder") or {})
+    await reply(
+        f"Vielen Dank! Ihre Mangelmeldung mit {anzahl} Foto(s) wurde aufgenommen. "
+        "Wir melden uns zeitnah bei Ihnen."
+    )
+    return ConversationHandler.END
+
+
+async def fotos_fertig(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    session = context.user_data.get("session")
+    if session is None:
+        await query.edit_message_text("Sitzung nicht gefunden. Bitte starten Sie mit /start neu.")
+        return ConversationHandler.END
+    return await _finalize_fotos(session, reply=query.edit_message_text)
+
+
+async def timing_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    chat_id = str(update.effective_chat.id)
+    raw = query.data or ""
+    if not raw.startswith(TIMING_CALLBACK_PREFIX):
+        return
+    slot_id = raw[len(TIMING_CALLBACK_PREFIX):]
+
+    sessions = _load_json(SESSIONS_FILE, {})
+    if not isinstance(sessions, dict):
+        await query.edit_message_text("Keine offenen Termine gefunden.")
+        return
+
+    target = None
+    for s in sorted(
+        sessions.values(),
+        key=lambda x: x.get("aktualisiert_am", ""),
+        reverse=True,
+    ):
+        if str(s.get("chat_id")) != chat_id:
+            continue
+        termine = s.get("termine") or {}
+        if termine.get("vorgeschlagen") and not termine.get("ausgewaehlt"):
+            target = s
+            break
+
+    if target is None:
+        await query.edit_message_text("Keine offenen Termine gefunden.")
+        return
+
+    proposed = (target.get("termine") or {}).get("vorgeschlagen") or []
+    chosen = next((t for t in proposed if t.get("id") == slot_id), None)
+    if chosen is None:
+        await query.edit_message_text("Termin nicht gefunden.")
+        return
+
+    target.setdefault("termine", {})["ausgewaehlt"] = {**chosen, "selected_at": now_iso()}
+    target["aktualisiert_am"] = now_iso()
+    sessions[target["session_id"]] = target
+    _write_json(SESSIONS_FILE, sessions)
+
+    handwerker_name = (target.get("handwerker") or {}).get("name", "Der Handwerker")
+    await query.edit_message_text(
+        f"Vielen Dank! Ihr Wunschtermin wurde festgehalten:\n\n{chosen['label']}\n\n"
+        f"{handwerker_name} kommt zum vereinbarten Zeitpunkt vorbei. "
+        "Sie erhalten vorab eine Bestätigung."
+    )
 
 
 async def commercial_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -493,7 +568,8 @@ def main() -> None:
                 MessageHandler(filters.TEXT & ~filters.COMMAND, private_mangel)
             ],
             PRIVATE_FOTOS: [
-                MessageHandler(filters.PHOTO | (filters.TEXT & ~filters.COMMAND), private_fotos)
+                CallbackQueryHandler(fotos_fertig, pattern=f"^{FOTOS_FERTIG_CALLBACK}$"),
+                MessageHandler(filters.PHOTO | (filters.TEXT & ~filters.COMMAND), private_fotos),
             ],
             COMMERCIAL_FLOW: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, commercial_flow)
@@ -503,6 +579,7 @@ def main() -> None:
     )
 
     app.add_handler(conv)
+    app.add_handler(CallbackQueryHandler(timing_selected, pattern=f"^{re.escape(TIMING_CALLBACK_PREFIX)}"))
     app.add_handler(CommandHandler("help", help_command))
 
     logger.info("Starting bot...")
